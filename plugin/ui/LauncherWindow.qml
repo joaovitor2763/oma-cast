@@ -79,6 +79,7 @@ OverlayWindow {
   // Called on every open, before the surface maps.
   function prepare(payload) {
     popTimer.stop()
+    window.draggingOut = false
     if (typeof payload.query === "string") window.query = payload.query
     window.actionPanelOpen = false
     window.historyIndex = -1
@@ -88,6 +89,9 @@ OverlayWindow {
 
   // The shell hid us: start the pop-to-root clock (SPEC §5.1).
   onShownChanged: {
+    // A drag whose row was destroyed mid-flight never reports its end; never
+    // let that leave the next open invisible and click-through.
+    window.draggingOut = false
     if (window.shown) return
     window.actionPanelOpen = false
     var seconds = Number(window.general.popToRootTimeout)
