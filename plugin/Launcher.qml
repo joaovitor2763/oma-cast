@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Hyprland
 import qs.Commons
 import "ui"
+import "services"
 
 // oma-cast: a Raycast-style launcher as an Omarchy shell plugin.
 //
@@ -36,7 +37,7 @@ Item {
     launcher.prepare(payload)
     // Like Omarchy's menu: rescan icons on open so apps installed after the
     // shell started (whose icons Qt's theme cache misses) get theirs.
-    if (!wasOpen && backend.appLibrary) backend.appLibrary.refreshIcons()
+    if (!wasOpen) (backend.appLibrary || iconIndex).refreshIcons()
     if (!wasOpen) backend.emit("window.visibilityChanged", { visible: true })
   }
 
@@ -94,11 +95,14 @@ Item {
     summon: function(id, payload) { return root.shell ? root.shell.summon(id, payload) : false }
   }
 
+  IconIndex { id: iconIndex }
+
   LauncherWindow {
     id: launcher
     shown: root.opened
     backend: backend
-    appLibrary: backend.appLibrary
+    // Rows only call iconSource(), which IconIndex provides without the shell.
+    appLibrary: backend.appLibrary || iconIndex
     onDismissRequested: root.hide()
   }
 
