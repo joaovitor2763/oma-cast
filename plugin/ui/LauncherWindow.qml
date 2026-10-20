@@ -54,6 +54,9 @@ OverlayWindow {
   property bool draggingOut: false
 
   mask: window.draggingOut ? passThrough : null
+  // Hyprland keeps pointer focus on a layer with exclusive keyboard focus,
+  // so the drop would never reach the window underneath; let go while dragging.
+  shownKeyboardFocus: window.draggingOut ? WlrKeyboardFocus.None : WlrKeyboardFocus.Exclusive
   Region { id: passThrough }
 
   readonly property bool atRoot: window.stack.length === 1
