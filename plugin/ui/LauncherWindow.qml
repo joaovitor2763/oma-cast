@@ -53,7 +53,8 @@ OverlayWindow {
   readonly property bool atRoot: window.stack.length === 1
   readonly property bool compact: window.general.windowMode === "compact" && window.atRoot && !window.query
   readonly property string placeholder: window.view.kind === "alias" ? "Type an alias, then press ↵"
-    : (window.view.kind === "menu" ? "Search " + window.view.title + "…" : "Search for apps and commands…")
+    : (window.view.kind === "menu" ? "Search " + window.view.title + "…"
+    : (window.view.kind === "files" ? "Search files and folders…" : "Search for apps, commands and files…"))
 
   readonly property int cardWidth: Math.min(px(750), width - Style.gapsOut * 2)
   readonly property int fullHeight: Math.min(px(475), height - Style.gapsOut * 2)
@@ -123,7 +124,10 @@ OverlayWindow {
 
   function rebuild(resetSelection) {
     pointerGate.reset()
-    var keepId = !resetSelection && window.selectedRow ? window.selectedRow.itemId : ""
+    // A selection still on the top row follows the top row, so rows that
+    // arrive late (file search) take the top instead of pushing it down.
+    var onTop = window.selectedIndex >= 0 && window.selectedIndex === window.nextSelectable(-1, 1)
+    var keepId = !resetSelection && !onTop && window.selectedRow ? window.selectedRow.itemId : ""
     rows.clear()
     if (window.view.kind === "alias") { window.select(-1); return }
     var result = window.backend.callSync("rootSearch.search", { query: window.query, view: window.view })
@@ -372,7 +376,7 @@ OverlayWindow {
       if (key === Qt.Key_PageUp) { window.move(-8); return true }
       if (key === Qt.Key_PageDown) { window.move(8); return true }
       if (ctrl && shift && key === Qt.Key_F) { window.performIfOffered(["favorite-add", "favorite-remove"]); return true }
-      if (ctrl && shift && key === Qt.Key_C) { window.performIfOffered(["copy-command", "copy-id"]); return true }
+      if (ctrl && shift && key === Qt.Key_C) { window.performIfOffered(["copy-command", "copy-id", "copy-path"]); return true }
       if (alt && shift && key === Qt.Key_D) { window.performIfOffered(["disable"]); return true }
       if (ctrl && key >= Qt.Key_1 && key <= Qt.Key_9) {
         var target = window.nthItem(key - Qt.Key_0)
@@ -578,7 +582,9 @@ OverlayWindow {
           anchors.horizontalCenter: parent.horizontalCenter
           textFormat: Text.PlainText
           text: window.view.kind === "alias" ? window.view.title
-            : (window.backend.ready ? "No results" : "Loading…")
+            : (!window.backend.ready ? "Loading…"
+            : (window.view.kind !== "files" ? "No results"
+            : (window.query.trim().length < 2 ? "Search your home folder" : (window.backend.loading ? "Searching…" : "No files found"))))
           color: window.look.foreground
           font.family: window.look.fontFamily
           font.pixelSize: Math.round(Style.font.title * window.zoom)
