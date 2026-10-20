@@ -34,6 +34,9 @@ Item {
     root.opened = true
     root.openedAt = Date.now()
     launcher.prepare(payload)
+    // Like Omarchy's menu: rescan icons on open so apps installed after the
+    // shell started (whose icons Qt's theme cache misses) get theirs.
+    if (!wasOpen && backend.appLibrary) backend.appLibrary.refreshIcons()
     if (!wasOpen) backend.emit("window.visibilityChanged", { visible: true })
   }
 
