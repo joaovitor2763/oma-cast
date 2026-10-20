@@ -161,8 +161,10 @@ function fallbackRows(query) {
 
 // Sections for the root view (SPEC §7.2):
 //   empty query: Favorites, Suggestions, Commands, Applications
-//   query:       Results, Files [D], Use "<q>" with…
-// ctx.files holds the file rows for the query (core/FileSearch.js), already ranked.
+//   query:       Calculator, Stock [D], Results, Files [D], Use "<q>" with…
+// ctx.files holds the file rows for the query (core/FileSearch.js), already ranked;
+// ctx.calculator the answer row (core/Calc.js), if the query is a calculation;
+// ctx.stock {card, title} (core/Stocks.js), if it names a ticker.
 function rootSections(candidates, query, ctx, deps) {
   var q = String(query || "").trim()
   var decorated = []
@@ -176,6 +178,8 @@ function rootSections(candidates, query, ctx, deps) {
     var searchable = decorated.filter(function(c) { return c.rootSearch.when !== "empty" })
     var results = deps.Ranker.rank(searchable, q, opts)
     var sections = []
+    if (ctx.calculator) sections.push({ id: "calculator", title: "Calculator", rows: [{ candidate: ctx.calculator, record: null }] })
+    if (ctx.stock) sections.push({ id: "stock", title: "Stock", rows: [{ candidate: ctx.stock.card, record: null }] })
     if (results.length > 0) sections.push({ id: "results", title: "Results", rows: results })
     var files = ctx.files || []
     if (files.length > 0) sections.push({ id: "files", title: "Files", rows: files.map(function(c) { return { candidate: c, record: null } }) })
@@ -228,6 +232,8 @@ function submenuSections(candidates, menuId, query, ctx, deps) {
 // primary (↵), the second secondary (Ctrl ↵).
 function actionsFor(candidate) {
   if (candidate.kind === "file" || candidate.kind === "folder") return fileActions(candidate)
+  if (candidate.kind === "calculator") return calculatorActions()
+  if (candidate.kind === "stock") return stockActions(candidate)
   var primary
   var list = []
   switch (candidate.kind) {
@@ -275,6 +281,21 @@ function fileActions(candidate) {
   ]
 }
 
+// The calculator row lives only as long as its query, like file rows.
+function calculatorActions() {
+  return [
+    { id: "copy-answer", title: "Copy Answer", shortcut: "↵", section: "primary", icon: "" },
+    { id: "copy-expression", title: "Copy Expression and Answer", shortcut: "Ctrl ↵", section: "primary", icon: "" }
+  ]
+}
+
+function stockActions(candidate) {
+  return [
+    { id: "copy-value", title: "Copy Value", shortcut: "↵", section: "primary", icon: "" },
+    { id: "open-web", title: "Open in Google Finance", shortcut: "Ctrl ↵", section: "primary", icon: "" }
+  ]
+}
+
 // Favourite ordering: returns the new {id: order} map for an action.
 function reorderFavorites(commands, id, action) {
   var favs = []
@@ -310,6 +331,8 @@ if (typeof module !== "undefined") {
     submenuSections: submenuSections,
     actionsFor: actionsFor,
     fileActions: fileActions,
+    calculatorActions: calculatorActions,
+    stockActions: stockActions,
     reorderFavorites: reorderFavorites,
     fallbackUrl: fallbackUrl
   }

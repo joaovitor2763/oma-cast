@@ -11,6 +11,8 @@ import "core/Frecency.js" as Frecency
 import "core/OmarchyMenu.js" as OmarchyMenu
 import "core/RootSearch.js" as RootSearch
 import "core/FileSearch.js" as FileSearch
+import "core/Calc.js" as Calc
+import "core/Stocks.js" as Stocks
 import "services"
 
 // The clone's backend, in-process (SPEC §2.0). It owns the paths, the host
@@ -40,7 +42,7 @@ Item {
   property var candidates: []
   property var candidatesById: ({})
   property int candidatesRevision: 0
-  readonly property bool loading: menuSource.loading || fileSource.loading
+  readonly property bool loading: menuSource.loading || fileSource.loading || stockSource.loading
 
   signal notification(string method, var data)
 
@@ -232,6 +234,49 @@ Item {
     throw new Error("Unknown action " + action)
   }
 
+  // Rows computed from the last root query rather than stored: the
+  // calculator answer (core/Calc.js), the stock card and its indicators
+  // (core/Stocks.js). id -> candidate.
+  property var instantRows: ({})
+
+  function instantSearch(query, ctx) {
+    var found = {}
+    var answer = Calc.evaluate(query, ratesSource.rates)
+    if (answer) {
+      ctx.calculator = Calc.candidate(answer)
+      found[ctx.calculator.id] = ctx.calculator
+    }
+    var stock = Stocks.parse(query)
+    stockSource.request(stock ? stock.symbol : "")
+    if (stock) {
+      var entry = stockSource.lookup(stock.symbol)
+      if (!entry) ctx.stock = { card: Stocks.loadingCard(stock), title: "" }
+      else if (entry.quote) ctx.stock = Stocks.rows(entry.quote, stock, ratesSource.rates)
+      else if (stock.explicit) ctx.stock = { card: Stocks.missingCard(stock), title: "" }
+      if (ctx.stock) found[ctx.stock.card.id] = ctx.stock.card
+    }
+    backend.instantRows = found
+  }
+
+  function performInstantAction(row, action) {
+    switch (action) {
+      case "open":
+      case "copy-answer":
+      case "copy-value":
+        if (!row.copy) return { toast: { style: "failure", title: "Nothing to copy yet" } }
+        Util.execArgv(["wl-copy", "--", row.copy])
+        return { close: true, hud: "Copied " + row.copy }
+      case "copy-expression":
+        Util.execArgv(["wl-copy", "--", row.subtitle + " = " + row.title.replace(/\u202f/g, "")])
+        return { close: true, hud: "Copied to Clipboard" }
+      case "open-web":
+        if (!row.url) return { toast: { style: "failure", title: "No page for this row" } }
+        Util.execArgv(["omarchy-launch-browser", row.url])
+        return { close: true }
+    }
+    throw new Error("Unknown action " + action)
+  }
+
   // A file or folder row (core/FileSearch.js); see RootSearch.fileActions.
   function performFileAction(candidate, action) {
     var path = candidate.path
@@ -344,6 +389,7 @@ Item {
         if (!view || view.kind === "root") {
           fileSource.request(query)
           ctx.files = fileSource.rowsFor(query, FileSearch.ROOT_LIMIT)
+          backend.instantSearch(query, ctx)
         }
         var sections = view && view.kind === "menu"
           ? RootSearch.submenuSections(backend.candidates, view.menuId, query, ctx, backend.deps)
@@ -353,6 +399,8 @@ Item {
         })
       },
       getActions: function(data) {
+        var instant = backend.instantRows[String(data && data.id || "")]
+        if (instant) return RootSearch.actionsFor(instant)
         var file = fileSource.lookup(String(data && data.id || ""))
         if (file) return RootSearch.actionsFor(file)
         var candidate = backend.decorated(String(data && data.id || ""))
@@ -370,6 +418,8 @@ Item {
           Util.execArgv(["omarchy-launch-browser", RootSearch.fallbackUrl(fallback, data.query)])
           return { close: true }
         }
+        var instantRow = backend.instantRows[String(data && data.id || "")]
+        if (instantRow) return backend.performInstantAction(instantRow, String(data.action || "open"))
         var file = fileSource.lookup(String(data && data.id || ""))
         if (file) return backend.performFileAction(file, String(data.action || "open"))
         return backend.performAction(data)
@@ -408,7 +458,7 @@ Item {
   // Guards and providers describe live system state: refresh them each open.
   Component.onDestruction: { settingsStore.flush(); frecencyStore.flush() }
   onNotification: function(method, data) {
-    if (method === "window.visibilityChanged" && data && data.visible) menuSource.refresh()
+    if (method === "window.visibilityChanged" && data && data.visible) { menuSource.refresh(); ratesSource.refresh() }
   }
 
   // ------------------------------------------------------------ persistence
@@ -432,6 +482,22 @@ Item {
     id: fileSource
     onRevisionChanged: backend.candidatesRevision++
     onMessage: function(level, text, metadata) { backend.log(level, "files", text, metadata) }
+  }
+
+  CurrencyRatesSource {
+    id: ratesSource
+    ready: backend.directoriesReady
+    path: backend.paths.cache + "/currency-rates.json"
+    onRevisionChanged: backend.candidatesRevision++
+    onMessage: function(level, text, metadata) { backend.log(level, "calculator", text, metadata) }
+  }
+
+  StockQuoteSource {
+    id: stockSource
+    script: Qt.resolvedUrl("scripts/yahoo-quote").toString().replace(/^file:\/\//, "")
+    cacheDir: backend.paths.cache
+    onRevisionChanged: backend.candidatesRevision++
+    onMessage: function(level, text, metadata) { backend.log(level, "stocks", text, metadata) }
   }
 
   JsonStore {

@@ -92,7 +92,8 @@ oma-cast is early. Search, ranking and the Omarchy integration are done. Coming 
 
 - [ ] Settings window
 - [ ] Script Commands
-- [ ] Clipboard history, snippets, quicklinks, calculator
+- [x] Calculator (maths, units, currencies)
+- [ ] Clipboard history, snippets, quicklinks
 - [ ] Running Raycast extensions built from the open-source [`raycast/extensions`](https://github.com/raycast/extensions) repo
 - [ ] Window management
 - [ ] Importing your `.rayconfig` from macOS

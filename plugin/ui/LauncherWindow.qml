@@ -87,7 +87,7 @@ OverlayWindow {
     window.actionPanelOpen = false
     window.historyIndex = -1
     window.rebuild(true)
-    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+    Qt.callLater(function() { queryInput.forceActiveFocus(); queryInput.cursorPosition = queryInput.text.length })
   }
 
   // The shell hid us: start the pop-to-root clock (SPEC §5.1).
@@ -176,7 +176,12 @@ OverlayWindow {
       checked: !!c.checked,
       disabled: !!c.disabled,
       favorite: typeof c.favoriteOrder === "number",
-      path: String(c.path || "")
+      path: String(c.path || ""),
+      leftCaption: String(c.leftCaption || ""),
+      rightCaption: String(c.rightCaption || ""),
+      card: !!c.card || c.kind === "calculator",
+      cardData: String(c.cardData || ""),
+      tone: String(c.tone || "")
     }
   }
 
@@ -390,7 +395,7 @@ OverlayWindow {
       if (key === Qt.Key_PageUp) { window.move(-8); return true }
       if (key === Qt.Key_PageDown) { window.move(8); return true }
       if (ctrl && shift && key === Qt.Key_F) { window.performIfOffered(["favorite-add", "favorite-remove"]); return true }
-      if (ctrl && shift && key === Qt.Key_C) { window.performIfOffered(["copy-command", "copy-id", "copy-path"]); return true }
+      if (ctrl && shift && key === Qt.Key_C) { window.performIfOffered(["copy-command", "copy-id", "copy-path", "copy-answer", "copy-value"]); return true }
       if (alt && shift && key === Qt.Key_D) { window.performIfOffered(["disable"]); return true }
       if (ctrl && key >= Qt.Key_1 && key <= Qt.Key_9) {
         var target = window.nthItem(key - Qt.Key_0)
@@ -399,9 +404,11 @@ OverlayWindow {
       }
     }
 
-    if (Util.editsFilter(event, window.query)) { window.setQuery(Util.editedFilter(event, window.query)); return true }
+    // The query is a real TextInput (queryInput), so typing, dead keys and
+    // input methods, selection, Ctrl+A/C/V/X/Z and arrows are its own; only
+    // Ctrl+U (clear) and Backspace on an empty query (go back) are ours.
+    if (ctrl && !shift && !alt && key === Qt.Key_U) { window.setQuery(""); return true }
     if (key === Qt.Key_Backspace && !window.query && !window.atRoot) { window.pop(); return true }
-    if (window.isTyping(event)) { window.setQuery(window.query + event.text); return true }
     return false
   }
 
@@ -437,15 +444,7 @@ OverlayWindow {
     clip: true
     opacity: window.draggingOut ? 0 : 1
 
-    MouseArea { anchors.fill: parent; onClicked: { window.actionPanelOpen = false; keyCatcher.forceActiveFocus() } }
-
-    Item {
-      id: keyCatcher
-      anchors.fill: parent
-      focus: true
-      Keys.priority: Keys.BeforeItem
-      Keys.onPressed: function(event) { if (window.handleKey(event)) event.accepted = true }
-    }
+    MouseArea { anchors.fill: parent; onClicked: { window.actionPanelOpen = false; queryInput.forceActiveFocus() } }
 
     // -------------------------------------------------------- header
     Item {
@@ -485,37 +484,61 @@ OverlayWindow {
         }
       }
 
-      Text {
-        id: queryText
-        textFormat: Text.PlainText
+      // The search field. A real TextInput, so fcitx/dead keys compose
+      // (ABNT2 ^ ~ ´ `), and selection and clipboard keys work; handleKey()
+      // sees every key first and takes navigation and shortcuts.
+      TextInput {
+        id: queryInput
         anchors.left: lead.right
         anchors.leftMargin: window.px(12)
         anchors.right: parent.right
         anchors.rightMargin: window.px(20)
         anchors.verticalCenter: parent.verticalCenter
-        text: window.query || window.placeholder
+        focus: true
+        clip: true
+        readOnly: window.actionPanelOpen
         color: window.look.foreground
-        opacity: window.query ? 1 : 0.45
+        selectionColor: Util.alpha(window.look.accent, 0.35)
+        selectedTextColor: window.look.foreground
+        cursorDelegate: Rectangle {
+          width: Math.max(1, Style.space(2))
+          color: window.look.accent
+          visible: queryInput.activeFocus && window.shown && !window.actionPanelOpen
+          SequentialAnimation on opacity {
+            running: window.shown
+            loops: Animation.Infinite
+            NumberAnimation { to: 1; duration: 0 }
+            PauseAnimation { duration: 530 }
+            NumberAnimation { to: 0; duration: 0 }
+            PauseAnimation { duration: 530 }
+          }
+        }
         font.family: window.look.fontFamily
         font.pixelSize: Math.round(Style.font.heading * 1.15 * window.zoom)
-        elide: Text.ElideLeft
-      }
+        Keys.priority: Keys.BeforeItem
+        Keys.onPressed: function(event) { if (window.handleKey(event)) event.accepted = true }
+        onTextEdited: window.setQuery(text)
 
-      Rectangle {
-        width: Math.max(1, Style.space(2))
-        height: queryText.font.pixelSize + Style.space(4)
-        anchors.verticalCenter: parent.verticalCenter
-        x: queryText.x + (window.query ? Math.min(queryText.contentWidth, queryText.width) + Style.space(1) : 0)
-        color: window.look.accent
-        visible: window.shown && !window.actionPanelOpen
+        // Queries set from code (history, pop, Ctrl+U, pop-to-root).
+        Connections {
+          target: window
+          function onQueryChanged() {
+            if (queryInput.text === window.query) return
+            queryInput.text = window.query
+            queryInput.cursorPosition = queryInput.text.length
+          }
+        }
 
-        SequentialAnimation on opacity {
-          running: window.shown
-          loops: Animation.Infinite
-          NumberAnimation { to: 1; duration: 0 }
-          PauseAnimation { duration: 530 }
-          NumberAnimation { to: 0; duration: 0 }
-          PauseAnimation { duration: 530 }
+        Text {
+          anchors.fill: parent
+          verticalAlignment: Text.AlignVCenter
+          textFormat: Text.PlainText
+          text: window.placeholder
+          visible: !queryInput.text && !queryInput.preeditText
+          color: window.look.foreground
+          opacity: 0.45
+          font: queryInput.font
+          elide: Text.ElideRight
         }
       }
 

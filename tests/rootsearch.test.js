@@ -134,3 +134,11 @@ test("favourite reordering", () => {
 test("fallback URLs encode the query", () => {
   assert.equal(RS.fallbackUrl(RS.FALLBACKS[0], " a&b c "), "https://www.google.com/search?q=a%26b%20c")
 })
+
+test("a calculation answers in its own section above the results", () => {
+  const Calc = require("../plugin/core/Calc.js")
+  const sections = results("2+2", ctx({ calculator: Calc.candidate(Calc.evaluate("2+2")) }))
+  assert.equal(sections[0].id, "calculator")
+  assert.deepEqual(titles(sections[0]), ["4"])
+  assert.deepEqual(RS.actionsFor(sections[0].rows[0].candidate).map((a) => a.id), ["copy-answer", "copy-expression"])
+})

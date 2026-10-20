@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# yahoo-quote SYMBOL|?NAME CACHE_DIR
+# Prints {"chart": <v8 chart, 1y daily>, "quote": <v7 quote>} for one Yahoo
+# Finance symbol (unofficial API, no key) [D]. Either part is null when it
+# fails. "?berkshire" (or a symbol Yahoo doesn't know) is first resolved by
+# name through Yahoo's search: a B3 share if one matches, else the first
+# share/ETF/index/crypto on a main exchange. The v7 quote needs a session
+# cookie and "crumb"; both are cached in CACHE_DIR and renewed once when
+# Yahoo rejects them.
+set -u
+
+symbol=${1:?symbol}
+dir=${2:?cache dir}
+ua="Mozilla/5.0"   # Yahoo answers 429 to curl's own user agent
+jar="$dir/yahoo-cookies.txt"
+crumb_file="$dir/yahoo-crumb"
+
+# Best symbol for a company name, or nothing.
+resolve() {
+  local q
+  q=$(jq -rn --arg s "$1" '$s | @uri')
+  curl -sf -A "$ua" --max-time 5 \
+    "https://query2.finance.yahoo.com/v1/finance/search?q=$q&quotesCount=8&newsCount=0&listsCount=0" |
+    jq -r '
+      [.quotes[]? | select(.symbol and (.quoteType | IN("EQUITY", "ETF", "INDEX", "CRYPTOCURRENCY", "MUTUALFUND")))] as $all
+      | ([$all[] | select(.exchange == "SAO" and .quoteType == "EQUITY" and (.symbol | test("3[2-9]\\.SA$") | not))][0]
+         // [$all[] | select(.exchange | IN("SAO", "NYQ", "NMS", "NGM", "NCM", "PCX", "ASE", "BTS", "CCC", "SNP", "NIM", "DJI"))][0]
+         // $all[0]
+         | .symbol) // empty'
+}
+
+
+crumb() {
+  if [[ -s $crumb_file && -s $jar ]]; then cat "$crumb_file"; return; fi
+  curl -s -A "$ua" -c "$jar" -o /dev/null --max-time 5 https://fc.yahoo.com
+  local value
+  value=$(curl -sf -A "$ua" -b "$jar" --max-time 5 https://query2.finance.yahoo.com/v1/test/getcrumb) || return 1
+  [[ -n $value && $value != *" "* ]] || return 1
+  printf %s "$value" > "$crumb_file"
+  printf %s "$value"
+}
+
+quote() {
+  local value
+  value=$(crumb) || return 1
+  curl -sf -A "$ua" -b "$jar" --max-time 5 \
+    "https://query2.finance.yahoo.com/v7/finance/quote?symbols=$1&crumb=$value"
+}
+
+# Sets chart_json and quote_json for $1, fetching both at once.
+fetch() {
+  local encoded chart_out
+  encoded=$(jq -rn --arg s "$1" '$s | @uri')
+  chart_out=$(mktemp)
+  curl -sf -A "$ua" --max-time 5 -o "$chart_out" \
+    "https://query1.finance.yahoo.com/v8/finance/chart/$encoded?range=1y&interval=1d" &
+  local chart_pid=$!
+  quote_json=$(quote "$encoded") || { rm -f "$crumb_file"; quote_json=$(quote "$encoded") || quote_json=null; }
+  if wait "$chart_pid" && jq -e '.chart.result[0].meta.regularMarketPrice' "$chart_out" >/dev/null 2>&1; then
+    chart_json=$(cat "$chart_out")
+  else
+    chart_json=null
+  fi
+  rm -f "$chart_out"
+}
+
+chart_json=null
+quote_json=null
+if [[ $symbol == \?* ]]; then
+  symbol=$(resolve "${symbol#\?}")
+  [[ -n $symbol ]] && fetch "$symbol"
+else
+  fetch "$symbol"
+  # Not a symbol Yahoo knows ("berkshire"): try it as a name.
+  if [[ $chart_json == null ]]; then
+    symbol=$(resolve "$symbol")
+    [[ -n $symbol ]] && fetch "$symbol"
+  fi
+fi
+
+printf '{"chart":%s,"quote":%s}\n' "$chart_json" "${quote_json:-null}"

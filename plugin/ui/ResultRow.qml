@@ -1,11 +1,13 @@
 import QtQuick
 import Quickshell
 import qs.Commons
+import qs.Commons as Commons
 import "../core/FileSearch.js" as FileSearch
 
 // One list row (SPEC §10.2): 22 px icon, title, secondary subtitle, and right
 // accessories in Raycast's order: alias badge, ✓ state, type label. Section
-// headers use the same delegate with rowKind "section".
+// headers use the same delegate with rowKind "section". The calculator answer
+// (core/Calc.js) draws as a card instead: expression → answer, Spotlight-style.
 Item {
   id: row
 
@@ -23,6 +25,11 @@ Item {
   required property bool disabled
   required property bool favorite
   required property string path         // file rows only; makes the row draggable
+  required property string leftCaption  // card rows only (calculator, stock)
+  required property string rightCaption
+  required property bool card
+  required property string cardData     // stock card JSON (core/Stocks.js); "" for other rows
+  required property string tone         // "up" / "down": green / red value
 
   property bool selected: false
   property var look: null
@@ -35,10 +42,19 @@ Item {
   signal dragEnded(bool dropped)
 
   readonly property bool isSection: row.rowKind === "section"
+  readonly property bool isStock: row.cardData.length > 0
+  readonly property bool isCalculator: row.card && !row.isStock
+  readonly property var stockInfo: {
+    if (!row.isStock) return ({})
+    try { return JSON.parse(row.cardData) } catch (e) { return ({}) }
+  }
+  readonly property color upColor: "#4caf7d"            // [D] the theme has no green
+  readonly property color downColor: Commons.Color.urgent
+  function toneColor(fallback) { return row.tone === "up" ? row.upColor : (row.tone === "down" ? row.downColor : fallback) }
   function px(v) { return Math.round(Style.space(v) * row.zoom) }
 
   width: ListView.view ? ListView.view.width : 0
-  height: row.isSection ? (row.title ? px(30) : px(6)) : px(42)
+  height: row.isSection ? (row.title ? px(30) : px(6)) : (row.isStock ? px(160) : (row.isCalculator ? px(112) : px(42)))
 
   Text {
     visible: row.isSection && row.title.length > 0
@@ -62,8 +78,109 @@ Item {
     color: row.selected ? row.look.selectedBackground : "transparent"
     opacity: row.disabled ? 0.45 : 1
 
+    StockCard {
+      visible: row.isStock
+      anchors.fill: parent
+      anchors.margins: row.px(6)
+      info: row.stockInfo
+      look: row.look
+      zoom: row.zoom
+      selected: row.selected
+      upColor: row.upColor
+      downColor: row.downColor
+    }
+
+    // ---------------------------------------------------- calculator card
+    Item {
+      id: calcCard
+      visible: row.isCalculator
+      anchors.fill: parent
+      anchors.margins: row.px(6)
+
+      Rectangle {
+        anchors.fill: parent
+        radius: Math.max(Style.cornerRadius, row.px(6))
+        color: "transparent"
+        border.width: 1
+        border.color: Util.alpha(row.look.foreground, row.selected ? 0.18 : 0.1)
+      }
+
+      Rectangle {
+        id: calcDivider
+        width: 1
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.margins: row.px(14)
+        color: Util.alpha(row.look.foreground, 0.12)
+      }
+
+      Rectangle {
+        anchors.centerIn: calcDivider
+        width: row.px(28)
+        height: width
+        radius: width / 2
+        color: row.look.background
+        border.width: 1
+        border.color: Util.alpha(row.look.foreground, 0.15)
+        Text {
+          anchors.centerIn: parent
+          textFormat: Text.PlainText
+          text: "→"
+          color: row.look.foreground
+          opacity: 0.6
+          font.family: row.look.fontFamily
+          font.pixelSize: row.px(14)
+        }
+      }
+
+      Repeater {
+        model: [
+          { value: row.subtitle, caption: row.leftCaption, strong: false, tone: false },
+          { value: row.title, caption: row.rightCaption, strong: true, tone: true }
+        ]
+        delegate: Column {
+          required property var modelData
+          required property int index
+          x: index === 0 ? 0 : calcCard.width / 2
+          width: calcCard.width / 2
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: row.px(6)
+
+          Text {
+            width: parent.width - row.px(48)
+            anchors.horizontalCenter: parent.horizontalCenter
+            horizontalAlignment: Text.AlignHCenter
+            textFormat: Text.PlainText
+            text: modelData.value
+            color: modelData.strong && row.selected ? row.look.accent : row.look.foreground
+            font.family: row.look.fontFamily
+            font.pixelSize: Math.round(Style.font.heading * 1.35 * row.zoom)
+            font.weight: modelData.strong ? Font.DemiBold : Font.Normal
+            fontSizeMode: Text.HorizontalFit
+            minimumPixelSize: Math.round(Style.font.body * row.zoom)
+            elide: Text.ElideMiddle
+          }
+
+          Text {
+            width: parent.width - row.px(24)
+            anchors.horizontalCenter: parent.horizontalCenter
+            horizontalAlignment: Text.AlignHCenter
+            textFormat: Text.PlainText
+            text: modelData.caption
+            color: modelData.tone ? row.toneColor(row.look.foreground) : row.look.foreground
+            opacity: modelData.tone && row.tone ? 0.9 : 0.5
+            font.family: row.look.fontFamily
+            font.pixelSize: Math.round(Style.font.caption * row.zoom)
+            elide: Text.ElideRight
+          }
+        }
+      }
+    }
+
     Item {
       id: iconBox
+      visible: !row.card
       width: row.px(22)
       height: row.px(22)
       anchors.left: parent.left
@@ -93,6 +210,7 @@ Item {
 
     Row {
       id: accessories
+      visible: !row.card
       anchors.right: parent.right
       anchors.rightMargin: row.px(12)
       anchors.verticalCenter: parent.verticalCenter
@@ -152,6 +270,7 @@ Item {
     }
 
     Row {
+      visible: !row.card
       anchors.left: iconBox.right
       anchors.leftMargin: row.px(10)
       anchors.right: accessories.left
@@ -164,7 +283,7 @@ Item {
         id: titleText
         textFormat: Text.PlainText
         text: row.title
-        color: row.look.foreground
+        color: row.toneColor(row.look.foreground)
         font.family: row.look.fontFamily
         font.pixelSize: Math.round(Style.font.title * row.zoom)
         elide: Text.ElideRight
