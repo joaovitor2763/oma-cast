@@ -49,6 +49,12 @@ OverlayWindow {
   property var actions: []
   property var toast: null
   property int historyIndex: -1
+  // A file row is being dragged out: hide the card and let the pointer pass
+  // through the fullscreen surface, so the app underneath receives the drop.
+  property bool draggingOut: false
+
+  mask: window.draggingOut ? passThrough : null
+  Region { id: passThrough }
 
   readonly property bool atRoot: window.stack.length === 1
   readonly property bool compact: window.general.windowMode === "compact" && window.atRoot && !window.query
@@ -162,7 +168,8 @@ OverlayWindow {
       alias: String(c.alias || ""),
       checked: !!c.checked,
       disabled: !!c.disabled,
-      favorite: typeof c.favoriteOrder === "number"
+      favorite: typeof c.favoriteOrder === "number",
+      path: String(c.path || "")
     }
   }
 
@@ -421,6 +428,7 @@ OverlayWindow {
     color: window.look.background
     borderSpec: window.borderSpec
     clip: true
+    opacity: window.draggingOut ? 0 : 1
 
     MouseArea { anchors.fill: parent; onClicked: { window.actionPanelOpen = false; keyCatcher.forceActiveFocus() } }
 
@@ -561,6 +569,12 @@ OverlayWindow {
           // pointer (open, typing, scrolling) must not steal the cursor.
           onHovered: function(i, item, mouse) { if (!window.actionPanelOpen && pointerGate.moved(item, mouse)) window.select(i) }
           onClicked: function(i) { window.perform("open", i) }
+          onDragStarted: function(i) { window.select(i); window.actionPanelOpen = false; window.draggingOut = true }
+          // A drop somewhere else is done with the launcher; a cancelled drag brings it back.
+          onDragEnded: function(dropped) {
+            window.draggingOut = false
+            if (dropped) window.dismissRequested()
+          }
         }
       }
 
